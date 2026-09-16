@@ -2,16 +2,16 @@
 """
 json2toon - Convert between JSON and TOON (Token-Optimized Object Notation).
 
-Direction is inferred from the input file extension:
-    *.json  -> emits *.toon
-    *.toon  -> emits *.json
+Input format is auto-detected from content; a .json/.toon extension, if
+present, is used only as a hint. Reads from a file or stdin ('-').
 
 Usage:
-    json2toon.py some_file.json                 # -> some_file.toon
-    json2toon.py some_file.toon                 # -> some_file.json
-    json2toon.py some_file.json out.toon        # explicit output name
-    json2toon.py some_file.json -               # write to stdout
-    json2toon.py some_file.json -f              # overwrite without prompting
+    json2toon.py some_file.json            # -> some_file.toon
+    json2toon.py some_file.toon            # -> some_file.json
+    json2toon.py some_file.json out.toon   # explicit output name
+    json2toon.py some_file.json -          # write to stdout
+    json2toon.py - < in.json               # stdin -> stdout
+    json2toon.py some_file.json -f         # overwrite without prompting
 """
 
 import argparse
@@ -20,9 +20,11 @@ import os
 import re
 import sys
 
+
 _ARRAY_KEY_RE = re.compile(r'^(.+?)\[(\d+)\](?:\{([^}]*)\})?$')
 _ANON_ARRAY_RE = re.compile(r'^\[(\d+)\](?:\{([^}]*)\})?:\s*(.*)$')
 _SPECIAL_CHARS = set(':,[]{}#"\'\n\r\t\\')
+
 
 # --------------------------------------------------------------------- encode
 
@@ -44,6 +46,7 @@ def _encode_string(s):
         pass
     return s
 
+
 def _encode_primitive(v):
     if v is None:
         return 'null'
@@ -57,14 +60,17 @@ def _encode_primitive(v):
         return _encode_string(v)
     raise TypeError(f'Cannot encode type {type(v).__name__}')
 
+
 def _is_uniform_objects(arr):
     if not arr or not all(isinstance(x, dict) and x for x in arr):
         return False
     keys = set(arr[0].keys())
     return all(set(x.keys()) == keys for x in arr)
 
+
 def _all_values_primitive(arr):
     return all(not isinstance(v, (dict, list)) for x in arr for v in x.values())
+
 
 def _encode_array_field(key_str, arr, indent):
     pad = '  ' * indent
@@ -85,6 +91,7 @@ def _encode_array_field(key_str, arr, indent):
     for item in arr:
         lines.extend(_encode_list_item(item, indent + 1))
     return lines
+
 
 def _encode_list_item(item, indent):
     pad = '  ' * indent
@@ -111,6 +118,7 @@ def _encode_list_item(item, indent):
         return out
     return [f'{pad}- {_encode_primitive(item)}']
 
+
 def _encode_kv(key, value, indent):
     pad = '  ' * indent
     k = _encode_string(key) if isinstance(key, str) else str(key)
@@ -124,6 +132,7 @@ def _encode_kv(key, value, indent):
     if isinstance(value, list):
         return _encode_array_field(k, value, indent)
     return [f'{pad}{k}: {_encode_primitive(value)}']
+
 
 def encode_toon(value):
     if isinstance(value, dict):
@@ -139,6 +148,7 @@ def encode_toon(value):
         lines = _encode_array_field('', value, 0)
         return '\n'.join(lines) + '\n'
     return _encode_primitive(value) + '\n'
+
 
 # --------------------------------------------------------------------- decode
 
@@ -166,6 +176,7 @@ def _split_kv(s):
             return s[:i], s[i + 1:].lstrip()
         i += 1
     return s, None
+
 
 def _split_csv(s):
     if s == '':
@@ -204,6 +215,7 @@ def _split_csv(s):
     parts.append(''.join(buf))
     return parts
 
+
 def _unquote(s):
     s = s.strip()
     if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
@@ -214,6 +226,7 @@ def _unquote(s):
     if len(s) >= 2 and s[0] == "'" and s[-1] == "'":
         return s[1:-1]
     return s
+
 
 def _parse_scalar(s):
     s = s.strip()
@@ -233,8 +246,10 @@ def _parse_scalar(s):
         pass
     return s
 
+
 def _parse_key(s):
     return _unquote(s.strip())
+
 
 def _parse_array_body(lines, i, header_indent, count, fields):
     if fields is not None:
@@ -243,7 +258,8 @@ def _parse_array_body(lines, i, header_indent, count, fields):
             cells = _split_csv(lines[i][1])
             if len(cells) != len(fields):
                 raise ValueError(
-                    f'Row has {len(cells)} cells, expected {len(fields)}: {lines[i][1]!r}'
+                    f'row has {len(cells)} cells, expected {len(fields)}: '
+                    f'{lines[i][1]!r}'
                 )
             arr.append({f: _parse_scalar(c) for f, c in zip(fields, cells)})
             i += 1
@@ -251,6 +267,7 @@ def _parse_array_body(lines, i, header_indent, count, fields):
     if i < len(lines) and lines[i][0] > header_indent:
         return _parse_list(lines, i, lines[i][0])
     return [], i
+
 
 def _parse_list(lines, i, indent):
     items = []
@@ -290,6 +307,7 @@ def _parse_list(lines, i, indent):
         items.append(item)
     return items, i
 
+
 def _parse_object(lines, i, indent):
     result = {}
     while i < len(lines):
@@ -325,6 +343,7 @@ def _parse_object(lines, i, indent):
             i += 1
     return result, i
 
+
 def _parse_block(lines, i, indent):
     if i >= len(lines):
         return None, i
@@ -345,6 +364,7 @@ def _parse_block(lines, i, indent):
         return _parse_scalar(content), i + 1
     return _parse_object(lines, i, indent)
 
+
 def decode_toon(text):
     lines = []
     for raw in text.splitlines():
@@ -355,86 +375,152 @@ def decode_toon(text):
             continue
         indent = len(raw) - len(stripped)
         lines.append((indent, raw.strip()))
+
     if not lines:
         return {}
-    _, first = lines[0]
+
+    first = lines[0][1]
     if first.startswith('- ') or first == '-':
-        return _parse_list(lines, 0, 0)[0]
-    m = _ANON_ARRAY_RE.match(first)
-    if m:
-        count = int(m.group(1))
-        fields_raw = m.group(2)
-        inline = m.group(3)
-        fields = [f.strip() for f in fields_raw.split(',')] if fields_raw else None
-        if inline.strip():
-            return [_parse_scalar(v) for v in _split_csv(inline)]
-        return _parse_array_body(lines, 1, 0, count, fields)[0]
-    key_part, rest = _split_kv(first)
-    if rest is None:
-        return _parse_scalar(first)
-    return _parse_object(lines, 0, 0)[0]
+        result, i = _parse_list(lines, 0, 0)
+    else:
+        m = _ANON_ARRAY_RE.match(first)
+        if m:
+            count = int(m.group(1))
+            fields_raw = m.group(2)
+            inline = m.group(3)
+            fields = [f.strip() for f in fields_raw.split(',')] if fields_raw else None
+            if inline.strip():
+                result, i = [_parse_scalar(v) for v in _split_csv(inline)], 1
+            else:
+                result, i = _parse_array_body(lines, 1, 0, count, fields)
+        else:
+            key_part, rest = _split_kv(first)
+            if rest is None:
+                if len(lines) > 1:
+                    raise ValueError(
+                        f'unexpected content at line 2: {lines[1][1]!r}'
+                    )
+                return _parse_scalar(first)
+            result, i = _parse_object(lines, 0, 0)
+
+    if i < len(lines):
+        raise ValueError(
+            f'unexpected content at line {i + 1}: {lines[i][1]!r}'
+        )
+    return result
 
 
-# ------------------------------------------------------------------------ cli
+# --------------------------------------------------------------- detection
 
 def _detect_kind(path, text):
-    ext = os.path.splitext(path)[1].lower() if path else ''
-    if ext == '.json':
-        return 'json'
-    if ext == '.toon':
-        return 'toon'
+    """
+    Detect input format ('json' or 'toon').
+
+    Content is authoritative: if the text parses as JSON we call it JSON.
+    Otherwise we call it TOON, unless the file's extension claims JSON — in
+    which case we still return 'json' so the caller can surface a proper
+    JSON syntax error instead of trying to parse broken JSON as TOON.
+    """
+    if not text.strip():
+        raise ValueError('input is empty')
+
     stripped = text.lstrip()
-    if stripped.startswith('{') or stripped.startswith('['):
+    if stripped.startswith('#'):
+        # TOON comment lines; JSON has no comment syntax.
+        return 'toon'
+
+    try:
+        json.loads(text)
+        return 'json'
+    except json.JSONDecodeError:
+        pass
+
+    ext = ''
+    if path and path != '-':
+        ext = os.path.splitext(path)[1].lower()
+    if ext == '.json':
         return 'json'
     return 'toon'
 
 
+# ------------------------------------------------------------------------ cli
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog='json2toon',
-        description='Convert between JSON and TOON (Token-Optimized Object Notation). '
-                    'Direction is inferred from the input extension '
-                    '(.json -> .toon, .toon -> .json).',
+        description='Convert between JSON and TOON (Token-Optimized Object '
+                    'Notation). Input format is auto-detected from content; '
+                    'a .json/.toon extension, if present, is used only as a '
+                    'hint.',
     )
-    parser.add_argument('input', help='Input file (.json or .toon)')
-    parser.add_argument('output', nargs='?', default=None,
-                        help='Output file. Defaults to input with swapped extension. '
-                             'Use "-" for stdout.')
-    parser.add_argument('-f', '--force', action='store_true',
-                        help='Overwrite the output file without prompting.')
+    parser.add_argument(
+        'input', nargs='?', default='-',
+        help='Input file (.json or .toon), or "-" for stdin (default).',
+    )
+    parser.add_argument(
+        'output', nargs='?', default=None,
+        help='Output file. Defaults to input with swapped extension, or '
+             'stdout when reading from stdin. Use "-" for stdout.',
+    )
+    parser.add_argument(
+        '-f', '--force', action='store_true',
+        help='Overwrite the output file without prompting.',
+    )
     args = parser.parse_args(argv)
 
     in_path = args.input
-    if not os.path.exists(in_path):
-        print(f'json2toon: error: {in_path}: no such file', file=sys.stderr)
-        return 1
-    try:
-        with open(in_path, 'r', encoding='utf-8') as f:
-            text = f.read()
-    except OSError as e:
-        print(f'json2toon: error: {e}', file=sys.stderr)
-        return 1
 
-    kind = _detect_kind(in_path, text)
-    base, _ = os.path.splitext(in_path)
+    # -------- read input --------
+    if in_path == '-':
+        try:
+            text = sys.stdin.read()
+        except OSError as e:
+            print(f'json2toon: error: reading stdin: {e}', file=sys.stderr)
+            return 1
+        source_name = '<stdin>'
+        base = None
+    else:
+        if not os.path.exists(in_path):
+            print(f'json2toon: error: {in_path}: no such file', file=sys.stderr)
+            return 1
+        try:
+            with open(in_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+        except OSError as e:
+            print(f'json2toon: error: {in_path}: {e}', file=sys.stderr)
+            return 1
+        source_name = in_path
+        base = os.path.splitext(in_path)[0]
+
+    # -------- detect + convert --------
     try:
+        kind = _detect_kind(in_path, text)
         if kind == 'json':
             data = json.loads(text)
             out = encode_toon(data)
-            default_out = base + '.toon'
+            default_out = (base + '.toon') if base else '-'
         else:
             data = decode_toon(text)
             out = json.dumps(data, indent=2, ensure_ascii=False)
-            default_out = base + '.json'
-    except (ValueError, TypeError) as e:
-        print(f'json2toon: error: {e}', file=sys.stderr)
+            default_out = (base + '.json') if base else '-'
+    except json.JSONDecodeError as e:
+        print(f'json2toon: error: {source_name}: invalid JSON: {e}',
+              file=sys.stderr)
         return 2
-
-    out_path = args.output if args.output is not None else default_out
+    except ValueError as e:
+        # Raised by _detect_kind (empty input) or decode_toon (bad TOON).
+        print(f'json2toon: error: {source_name}: {e}', file=sys.stderr)
+        return 2
+    except TypeError as e:
+        print(f'json2toon: error: {source_name}: {e}', file=sys.stderr)
+        return 2
 
     if not out.endswith('\n'):
         out += '\n'
 
+    out_path = args.output if args.output is not None else default_out
+
+    # -------- write output --------
     if out_path == '-':
         sys.stdout.write(out)
         return 0
@@ -452,10 +538,10 @@ def main(argv=None):
         with open(out_path, 'w', encoding='utf-8') as f:
             f.write(out)
     except OSError as e:
-        print(f'json2toon: error: {e}', file=sys.stderr)
+        print(f'json2toon: error: {out_path}: {e}', file=sys.stderr)
         return 1
     return 0
 
+
 if __name__ == '__main__':
     sys.exit(main())
-  
